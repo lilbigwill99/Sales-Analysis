@@ -1,0 +1,280 @@
+---
+title: "Analysis on Sales Data"
+author: "Will Massey"
+date: "11/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+### Context
+
+Sales analytics is the practice of generating insights from sales data, trends, and metrics to set targets and forecast future sales performance. Sales analysis is mining your data to evaluate the performance of your sales team against its goals. It provides insights about the top performing and under performing products/services, the problems in selling and market opportunities, sales forecasting, and sales activities that generate revenue. More info on the dataset can be located [here on Kaggle.](https://www.kaggle.com/knightbearr/sales-product-data?select=Sales_September_2019.csv)
+
+### Content
+
+* Order ID - An Order ID is the number system that Amazon uses exclusively to keep track of orders. Each order receives its own 
+Order ID that will not be duplicated. This number can be useful to the seller when attempting to find out certain details about an order such as shipment date or status.
+
+* Product - The product that have been sold.
+
+* Quantity Ordered - Ordered Quantity is the total item quantity ordered in the initial order (without any changes).
+
+* Price Each - The price of each products.
+
+* Order Date - This is the date the customer is requesting the order be shipped.
+
+* Purchase Address - The purchase order is prepared by the buyer, often through a purchasing department. The purchase order, or PO, usually includes a PO number, which is useful in matching shipments with purchases; a shipping date; billing address; shipping address; and the request items, quantities and price.
+
+* Target - A target market analysis is an assessment of how your product or service fits into a specific market and where it will gain the most.
+
+### Task: 
+
+Q: What was the best Year for sales? How much was earned that Year?
+
+Q: What was the best month for sales? How much was earned that month?
+
+Q: What City had the highest number of sales?
+
+Q: What time should we display advertisement to maximize likelihood of customer's buying product?
+
+Q: What products are most often sold together?
+
+Q: What product sold the most? Why do you think it sold the most?
+
+### How Much Probability?
+
+* How much probability for the next customer to order "USB-C Charging Cable"?
+
+* How much probability for the next customer to order "iPhone"?
+
+* How much probability for the next customer to order "Google Phone"?
+
+*  How much probability for the next customer to order "Wired Headphones"?
+
+# The Analysis
+
+First we will begin by importing the required packages for analysis and then merge our data into one data frame.
+
+```{r message=FALSE, warning=FALSE}
+
+# importing packages
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(scales)
+library(stringr)
+library(gridExtra)
+
+```
+
+```{r}
+
+# importing csv files
+jan = read.csv("data/Sales_January_2019.csv")
+feb = read.csv("data/Sales_February_2019.csv")
+march = read.csv("data/Sales_March_2019.csv")
+april = read.csv("data/Sales_April_2019.csv")
+may = read.csv("data/Sales_May_2019.csv")
+june = read.csv("data/Sales_June_2019.csv")
+july = read.csv("data/Sales_July_2019.csv")
+aug = read.csv("data/Sales_August_2019.csv")
+sept = read.csv("data/Sales_September_2019.csv")
+oct = read.csv("data/Sales_October_2019.csv")
+nov = read.csv("data/Sales_November_2019.csv")
+dec = read.csv("data/Sales_December_2019.csv")
+
+# merging data sets into one table 
+sales = rbind(jan, feb)  %>% rbind(march) %>% rbind(april) %>% rbind(may) %>% rbind(june) %>% rbind(july) %>%
+  rbind(aug) %>% rbind(sept) %>% rbind(oct) %>% rbind(nov) %>% rbind(dec)
+
+```
+
+
+The data is a bit messy so we will clean it up and add a few new columns to make things easier for analysis.
+
+
+```{r message=FALSE, warning=FALSE}
+sales = distinct(sales[!apply(sales == "", 1, all),])[-c(1069),] # this line first removes all rows with empty ("") values, then it removes duplicates, then it removes row 1069 as it was a duplicate of an invalid entry (some type of error in the data)
+
+# formatting dates augmenting with month and year
+sales = sales %>% mutate(Date = strptime(sales$Order.Date, "%m/%d/%Y") %m+% years(2000)) %>% 
+  mutate(Month = month(Date), Year = year(Date))
+
+# grabbing hour and minute from Order.Date
+sales$Time = format(strptime(sales$Order.Date, "%m/%d/%Y %H:%M"), "%H:%M:%S")
+sales = separate(sales, Time, sep = ":", into = c("Hour", "Minute", "Second"))
+
+# formatting numeric variables
+sales$Price.Each = as.numeric(sales$Price.Each)
+sales$Quantity.Ordered = as.numeric(sales$Quantity.Ordered)
+
+# getting total price from (quantity * price each)
+sales = sales %>% mutate(Total.Price = Quantity.Ordered * Price.Each)
+
+# extracting city and state from address
+sales = sales %>% separate(Purchase.Address, sep = ",", into = c("Street", "City", "State.Zip"), remove = FALSE) %>%
+  separate(State.Zip, sep = " ", into = c("remove", "State", "Zip"), remove = TRUE)
+sales$remove = NULL
+
+# quick statistics 
+skim(sales)
+```
+
+
+Now that our data is clean, let's find our total sales on an annual basis.
+
+```{r}
+
+annual_sales = sales %>% group_by(Year) %>% summarise(Total.Sales = sum(Total.Price), Number.Orders = n_distinct(Order.ID))
+total_2019 = comma(annual_sales$Total.Sales[1:1])
+total_2020 = comma(annual_sales$Total.Sales[2:2])
+
+ggplot(annual_sales, aes(x=Year, y=Total.Sales, fill=Total.Sales)) + geom_bar(stat = "identity", color="black") + 
+  labs(title = "Total Sales by Year", x = "Year", y = "Total Sales", caption = paste0("Total Sales for 2019: $", total_2019, 
+                                                                                 "\nTotal Sales for 2020: $", total_2020)) +
+  theme(legend.position = "none", plot.caption.position = "plot", plot.caption = element_text(hjust = 0)) +
+  scale_y_continuous(labels = scales::comma) + scale_x_continuous(breaks = c(2019, 2020))
+
+```
+
+It appears there is not enough data for any year other than 2019 to get an accurate analysis on annual sales. However, we can see that the year 2019 brought in at least $34.4 million dollars in sales. We can now plot monthly sales to gain insight into which months bring in the most.
+
+```{r}
+
+monthly_sales = sales %>% group_by(Month) %>% summarise(Total.Sales = sum(Total.Price), Number.Orders = n_distinct(Order.ID))
+monthly_sales = monthly_sales %>% mutate(Month.Name = month.abb[monthly_sales$Month])
+
+ggplot(monthly_sales, aes(x=Month.Name, y=Total.Sales, fill=Total.Sales)) + geom_bar(stat = "identity", color="black") + 
+  labs(title = "Total Sales by Month", x = "Month", y = "Total Sales") +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::comma) + scale_x_discrete(limits = month.abb)
+
+```
+
+December takes the lead on most sales on a monthly basis with a total of at least \$4.6 million dollars in sales, followed by October with over \$3.7 million in sales. Next on our list is to find out which cities held the highest amount of sales. 
+
+```{r}
+
+city_sales = sales %>% group_by(City) %>% summarise(Total.Sales = sum(Total.Price), Number.Orders = n_distinct(Order.ID)) %>%
+  arrange(desc(Total.Sales))
+
+ggplot(city_sales, aes(x=reorder(City, -Total.Sales), y=Total.Sales, fill=Total.Sales)) + 
+  geom_bar(stat="identity", color="black") + 
+  labs(title="Total Sales by City", x = "City", y = "Total of Sales") + 
+  theme(axis.text.x = element_text(angle = 45), legend.position = "none") +
+  scale_y_continuous(labels = scales::comma)
+  
+
+```
+
+San Francisco has the most sales with over \$8.25 million dollars, followed by Los Angeles with \$5.4 million in sales, which are both coincidentally located within California. 
+
+In order to find out the best time to display advertisements, let's plot the hours at which orders are taken to see when users are most active. First we will plot total sales by hour, and then the number of sales by hour.
+
+```{r fig.width=10}
+
+hourly_sales = sales %>% group_by(Hour) %>% summarise(Total.Sales = sum(Total.Price), Number.Sales = n_distinct(Order.ID)) %>%
+  arrange(desc(Total.Sales))
+
+plt1 = ggplot(hourly_sales, aes(x=Hour, y=Total.Sales, fill=Total.Sales)) + geom_bar(stat = "identity", color = "black") + 
+  labs(title = "Total Sales by Hour", x = "Hour" , y = "Sales") + 
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::comma)
+
+plt2 = ggplot(hourly_sales, aes(x=Hour, y=Number.Sales, fill=Number.Sales)) + geom_bar(stat = "identity", color = "black") + 
+  labs(title = "Number of Sales by Hour", x = "Hour" , y = "Number of Sales") + 
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::comma)
+
+grid.arrange(plt1, plt2, ncol=2)
+
+```
+
+Based on our observations, the best time to display advertisements would be either 7PM or between 11AM and 12PM since those are the most active times.
+
+Now we will find out which items are selling the best and which items are frequently bought together. First we will graph total sales by each item, as well as the total quantity sold to see which products are the most popular.
+
+
+```{r fig.width=10}
+
+product_sales = sales %>% group_by(Product) %>% summarise(Total.Sales = sum(Total.Price), Number.Sold = n())
+
+plt1 = ggplot(product_sales, aes(x=reorder(Product, Total.Sales), y=Total.Sales, fill=Total.Sales)) + 
+  geom_bar(stat="identity", color="black") +
+  labs(title = "Total Sales by Product", x = "Product" , y = "Sales") + 
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::comma) + 
+  coord_flip()
+
+plt2 = ggplot(product_sales, aes(x=reorder(Product, Number.Sold), y=Number.Sold, fill=Number.Sold)) + 
+  geom_bar(stat="identity", color="black") +
+  labs(title = "Number of Sales by Product", x = "Product" , y = "Number of Sales") + 
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::comma) + 
+  coord_flip()
+
+grid.arrange(plt1, plt2, ncol=2)
+
+```
+
+
+Macbook Pro Laptops and iPhones make the most in sales, while USB-C Charging Cables and Lightning Charging Cables sell the most quantity, making these items the most popular. Now we will calculate the items most frequently sold together and display the top paired items in a table. 
+
+```{r echo=FALSE}
+
+# finding out which orders have more than one item purchased
+orders_mult_items = sales %>% group_by(Order.ID) %>% summarise(count = n()) %>% filter(count > 1)
+
+# counting the combinations of each products 
+items_bought_together = inner_join(sales, orders_mult_items, by = "Order.ID") %>% group_by(Order.ID) %>%
+  summarise(pair = paste(" / ", sort(unique(Product)), collapse = "")) %>%
+  group_by(pair) %>% 
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+# top n pairs
+top_pairs = head(items_bought_together, 15)
+top_pairs
+
+```
+
+# Probabilty
+
+We will be applying the Rule of Complementary Events to each product in order to see what the probability of the next customer ordering that specific item, then displaying the results in a table. 
+
+![Formula for the Rule of Complementary Events](rule.png)\
+
+```{r}
+
+pcts = sales %>% group_by(Product) %>% summarise(count = sum(Quantity.Ordered)) 
+pcts = pcts %>% mutate(Probability = count / sum(pcts$count)) %>% 
+  mutate(Purchase_Percent = paste0(round(Probability * 100, digits = 2), "%")) %>%
+  mutate(Wont_Purchase_Percent = paste0(round((1 - Probability) * 100, digits = 2), "%")) %>%
+  arrange(desc(Probability)) %>% select(Product, Purchase_Percent, Wont_Purchase_Percent)
+  
+
+pcts
+
+```
+
+Customers are most likely to buy batteries, charging cables, and headphones according to percentages. To answer the business questions stated previously, here are the specific probabilities of the products asked: 
+
+* USB-C Charging Cable - 11.46% chance of purchase  
+* iPhone - 3.28% chance of purchase  
+* Google Phone - 2.65% chance of purchase  
+* Wired Headphones - 	9.83% chance of purchase  
+
+# Conclusion
+
+* 2019 brought in a  total revenue of $34.4 million dollars. There was not enough data for an accurate analysis on other years.
+* December brought in the most sales by month, with \$4.6 million dollars in sales. October follows with \$3.7 million.
+* San Francisco brought in the most sales by city (\$8.25 million), followed by Los Angeles (\$5.4 million). 
+* 7PM, 11AM, and 12PM are the busiest times of the day, and also bring in the most sales by order time. This would be the best times to display advertisements.
+* Macbook Pro Laptops and iPhones bring in the most revenue by product, however USB-C Charging Cables and Lightning Charging Cables sell the most frequently, with AA and AAA batteries being an honorable mention. 
+* The items most frequently sold together are (iPhone / Lightning Charging Cable), (Google Phone / USB-C Charging Cable), and (iPhone / Wired Headphones).
+* AA Batteries, AAA Batteries, USB-C Charging Cable, and Lightning Charging Cable have the highest probability of being purchased given the current data. 
